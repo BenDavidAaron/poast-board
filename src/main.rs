@@ -1,11 +1,15 @@
-use std::sync::Mutex;
-
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
-use rusqlite::{params, Connection, Result as SqliteResult};
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::{params, Result as SqliteResult};
 use serde_json::json;
 
-fn initialize_db() -> SqliteResult<Connection> {
-    let conn = Connection::open("./poasts.db")?;
+type DbPool = r2d2::Pool<SqliteConnectionManager>;
+
+fn initialize_db(db_path: &str) -> SqliteResult<DbPool> {
+    let manager = SqliteConnectionManager::file(db_path);
+    let pool = r2d2::Pool::new(manager).expect("Failed to create pool");
+
+    let conn = pool.get().expect("Failed to get connection from pool");
     conn.execute(
         "CREATE TABLE IF NOT EXISTS poasts (
             path TEXT PRIMARY KEY,
@@ -13,15 +17,17 @@ fn initialize_db() -> SqliteResult<Connection> {
         )",
         [],
     )?;
-    Ok(conn)
+    Ok(pool)
 }
 
 async fn put_blob(
     path: web::Path<String>,
     body: String,
-    db: web::Data<Connection>,
+    pool: web::Data<DbPool>,
 ) -> impl Responder {
-    match db.execute(
+    let conn = pool.get().expect("couldn't get db connection from pool");
+
+    match conn.execute(
         "INSERT INTO poasts (path, body) VALUES (?1, ?2)",
         params![path.as_str(), body.as_str()],
     ) {
@@ -36,8 +42,10 @@ async fn put_blob(
     }
 }
 
-async fn get_blob(path: web::Path<String>, db: web::Data<Connection>) -> impl Responder {
-    let result: Result<String, rusqlite::Error> = db.query_row(
+async fn get_blob(path: web::Path<String>, pool: web::Data<DbPool>) -> impl Responder {
+    let conn = pool.get().expect("couldn't get db connection from pool");
+
+    let result: Result<String, rusqlite::Error> = conn.query_row(
         "SELECT body FROM poasts WHERE path = ?1",
         params![path.as_str()],
         |row| row.get(0),
@@ -59,20 +67,15 @@ async fn get_blob(path: web::Path<String>, db: web::Data<Connection>) -> impl Re
     }
 }
 
-async fn index() -> impl Responder {
-    HttpResponse::Ok().body("This is Poast Trough!")
-}
-
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let db_client = initialize_db().expect("Failed to connect to the database");
-    let db_client = web::Data::new(Mutex::new(db_client));
+    let pool = initialize_db("./poasts.db").expect("Failed to create database pool");
+    let pool = web::Data::new(pool);
 
-    // println!("Database initalized!");
+    println!("Database initialized!");
     HttpServer::new(move || {
         App::new()
-            .app_data(db_client.clone())
-            // .route("/", web::get().to(index))
+            .app_data(pool.clone())
             .route("/{path:.*}", web::put().to(put_blob))
             .route("/{path:.*}", web::get().to(get_blob))
     })
