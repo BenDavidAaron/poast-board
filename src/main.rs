@@ -27,6 +27,19 @@ async fn put_blob(
 ) -> impl Responder {
     let conn = pool.get().expect("couldn't get db connection from pool");
 
+    let result: Result<String, rusqlite::Error> = conn.query_row(
+        "SELECT body FROM poasts WHERE path = ?1", params![path.as_str()], |row| row.get(0)
+    );
+    match result {
+        Ok(_) => {
+            println!("Blob already exists at path: {}", path);
+            return HttpResponse::Conflict().json(json!({"error": "Blob already exists"}));
+        }
+        Err(_e) => {
+            // ignore the error and continue
+        }
+    }
+
     match conn.execute(
         "INSERT INTO poasts (path, body) VALUES (?1, ?2)",
         params![path.as_str(), body.as_str()],
