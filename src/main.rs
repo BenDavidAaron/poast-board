@@ -22,7 +22,7 @@ async fn put_blob(
     db: web::Data<Connection>,
 ) -> impl Responder {
     match db.execute(
-        "INSERT INTO poasts (title, body) VALUES (?1, ?2)",
+        "INSERT INTO poasts (path, body) VALUES (?1, ?2)",
         params![path.as_str(), body.as_str()],
     ) {
         Ok(_) => {
@@ -72,7 +72,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(db_client.clone())
-            .route("/", web::get().to(index))
+            // .route("/", web::get().to(index))
             .route("/{path:.*}", web::put().to(put_blob))
             .route("/{path:.*}", web::get().to(get_blob))
     })
